@@ -51,6 +51,8 @@
 </template>
 
 <script>
+const API_BASE_URL = "https://mg843bat2b.execute-api.us-east-1.amazonaws.com/prod";
+
 export default {
   name: "BookAppointment",
 
@@ -64,29 +66,35 @@ export default {
   },
 
   mounted() {
-    fetch("https://mg843bat2b.execute-api.us-east-1.amazonaws.com/prod/slots")
-      .then(res => res.json())
-      .then(data => {
-        let parsed;
-
-        if (Array.isArray(data)) {
-          parsed = data;
-        } else if (data && data.body) {
-          parsed = JSON.parse(data.body);
-        } else {
-          parsed = [];
-        }
-
-        this.slots = parsed
-          .filter(s => s.isBooked === false)
-          .map(s => s.slot);
-      })
-      .catch(err => {
-        console.error("Error loading slots:", err);
-      });
+    this.loadSlots();
   },
 
   methods: {
+    loadSlots() {
+      fetch(`${API_BASE_URL}/slots`)
+        .then(res => res.json())
+        .then(data => {
+          let parsed = [];
+
+          if (Array.isArray(data)) {
+            parsed = data;
+          } else if (data.slots) {
+            parsed = data.slots;
+          } else if (data.body) {
+            const body = typeof data.body === "string" ? JSON.parse(data.body) : data.body;
+            parsed = body.slots || body;
+          }
+
+          this.slots = parsed
+            .filter(s => s.isBooked === false || s.isBooked === "false")
+            .map(s => s.slot);
+        })
+        .catch(err => {
+          console.error("Error loading slots:", err);
+          this.slots = [];
+        });
+    },
+
     submitAppointment() {
       const payload = {
         patientName: this.name,
@@ -94,23 +102,49 @@ export default {
         slot: this.selectedSlot
       };
 
-      fetch("https://mg843bat2b.execute-api.us-east-1.amazonaws.com/prod/appointments", {
+      fetch(`${API_BASE_URL}/appointments`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json"
         },
         body: JSON.stringify(payload)
       })
-        .then(res => res.json())
+        .then(async res => {
+          const text = await res.text();
+          let data = {};
+
+          try {
+            data = text ? JSON.parse(text) : {};
+          } catch (e) {
+            data = {};
+          }
+
+          if (data.body) {
+            try {
+              data = typeof data.body === "string" ? JSON.parse(data.body) : data.body;
+            } catch (e) {
+              data = {};
+            }
+          }
+
+          if (!res.ok) {
+            throw new Error(data.message || data.error || "Booking failed");
+          }
+
+          return data;
+        })
         .then(() => {
           alert("Appointment booked!");
+
           this.name = "";
           this.symptoms = "";
           this.selectedSlot = "";
+
+          this.loadSlots();
         })
         .catch(err => {
           console.error("Error booking appointment:", err);
-          alert("Failed to book appointment.");
+          alert("Failed to book appointment: " + err.message);
         });
     }
   }
